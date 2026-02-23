@@ -69,7 +69,7 @@ result = (
 # name/market を付与（銘柄マスタが無い前提で、最新の行から拾う）
 meta = (
     df.sort_values(["code", "fiscal_year"])
-      .groupby("code")[["name", "market"]]
+      .groupby("code", as_index=False)[["code", "name", "market"]]
       .tail(1)
       .set_index("code")
 )
