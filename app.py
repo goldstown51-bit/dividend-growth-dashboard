@@ -76,25 +76,30 @@ meta = (
 result = result.join(meta, on="code")
 
 # --- 5年DPS CAGRを result に追加（安全版） ---
+# --- 5年DPS CAGRを result に追加（安定版） ---
 def dps_cagr_5y(group: pd.DataFrame) -> float:
     g = group.sort_values("fiscal_year")
     if len(g) < 6:
         return float("nan")
     latest = float(g.iloc[-1]["dps_regular_adj"])
-    past = float(g.iloc[-6]["dps_regular_adj"])  # 5年前
+    past = float(g.iloc[-6]["dps_regular_adj"])
     if past <= 0:
         return float("nan")
     return (latest / past) ** (1/5) - 1
 
-cagr_series = df.groupby("code").apply(dps_cagr_5y)
+# applyの戻り値を確実に1列のDataFrameにする
+cagr_df = (
+    df.groupby("code", as_index=False)
+      .apply(lambda g: pd.Series({
+          "DPS_CAGR_5Y": dps_cagr_5y(g)
+      }))
+)
 
-# pandasの挙動差を吸収：SeriesでもDataFrameでもOKにする
-cagr = cagr_series.reset_index()
-# 2列目の名前が何でも、最後の列をCAGRとして扱う
-cagr = cagr.rename(columns={cagr.columns[-1]: "DPS_CAGR_5Y"})
+# resultと結合
+result = result.merge(cagr_df, on="code", how="left")
 
-result = result.merge(cagr[["code", "DPS_CAGR_5Y"]], on="code", how="left")
-result["DPS_CAGR_5Y"] = (result["DPS_CAGR_5Y"] * 100).round(2)  # %
+# パーセント表示
+result["DPS_CAGR_5Y"] = (result["DPS_CAGR_5Y"] * 100).round(2)
 
 # UI
 # --- フィルター/UI ---
