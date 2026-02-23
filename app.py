@@ -75,30 +75,34 @@ meta = (
 )
 result = result.join(meta, on="code")
 
-# --- 5年DPS CAGRを result に追加（安全版） ---
-# --- 5年DPS CAGRを result に追加（安定版） ---
-def dps_cagr_5y(group: pd.DataFrame) -> float:
-    g = group.sort_values("fiscal_year")
-    if len(g) < 6:
-        return float("nan")
-    latest = float(g.iloc[-1]["dps_regular_adj"])
-    past = float(g.iloc[-6]["dps_regular_adj"])
-    if past <= 0:
-        return float("nan")
-    return (latest / past) ** (1/5) - 1
+# --- 5年DPS CAGRを result に追加（apply不使用・安定版） ---
+# code,fiscal_year,dps_regular_adj が df にある前提
 
-# applyの戻り値を確実に1列のDataFrameにする
-cagr_df = (
-    df.groupby("code", as_index=False)
-      .apply(lambda g: pd.Series({
-          "DPS_CAGR_5Y": dps_cagr_5y(g)
-      }))
+# 年度順に並んでいる前提だが、念のため
+tmp = df.sort_values(["code", "fiscal_year"]).copy()
+
+# 各銘柄の「最後の6年分」を取り出す（5年CAGRには6点必要）
+tail6 = tmp.groupby("code", as_index=False).tail(6)
+
+# 6年未満は自然に落ちる（CAGR計算できない）
+count = tail6.groupby("code")["fiscal_year"].count()
+valid_codes = count[count >= 6].index
+tail6 = tail6[tail6["code"].isin(valid_codes)]
+
+# 各銘柄の oldest（5年前）と latest を取る
+first_last = (
+    tail6.groupby("code")
+         .agg(past=("dps_regular_adj", "first"),
+              latest=("dps_regular_adj", "last"))
+         .reset_index()
 )
 
-# resultと結合
-result = result.merge(cagr_df, on="code", how="left")
+# CAGR計算（past<=0 は除外）
+first_last["DPS_CAGR_5Y"] = (first_last["latest"] / first_last["past"]) ** (1/5) - 1
+first_last.loc[first_last["past"] <= 0, "DPS_CAGR_5Y"] = pd.NA
 
-# パーセント表示
+# resultへ結合
+result = result.merge(first_last[["code", "DPS_CAGR_5Y"]], on="code", how="left")
 result["DPS_CAGR_5Y"] = (result["DPS_CAGR_5Y"] * 100).round(2)
 
 # UI
