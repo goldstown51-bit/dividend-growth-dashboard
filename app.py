@@ -85,9 +85,9 @@ tmp = df.sort_values(["code", "fiscal_year"]).copy()
 tail6 = tmp.groupby("code", as_index=False).tail(6)
 
 # 6年未満は自然に落ちる（CAGR計算できない）
-count = tail6.groupby("code")["fiscal_year"].count()
-valid_codes = count[count >= 6].index
-tail6 = tail6[tail6["code"].isin(valid_codes)]
+counts = tail6.groupby("code")["fiscal_year"].count()
+valid_codes = set(counts[counts >= 6].index.astype(str))
+tail6 = tail6[tail6["code"].astype(str).isin(valid_codes)]
 
 # 各銘柄の oldest（5年前）と latest を取る
 first_last = (
@@ -107,13 +107,21 @@ result["DPS_CAGR_5Y"] = (result["DPS_CAGR_5Y"] * 100).round(2)
 
 # UI
 # --- フィルター/UI ---
-# max_streak が 0 のときも壊れないようにする
-max_streak = int(result["連続増配年数"].max()) if len(result) else 0
-max_streak = max(0, max_streak)
+# =========================
+# UI（ここから下を置き換え）
+# =========================
 
+# result が空ならここで止める（骨組みCSVの段階で落ちない）
+if result.empty:
+    st.warning("配当データ（dps_regular_adj）が未入力のため、ランキングを計算できません。CSVに配当実績を入れると表示されます。")
+    st.stop()
+
+# max_streak（スライダー範囲）
+max_streak = int(result["連続増配年数"].max())
+max_streak = max(0, max_streak)
 st.caption(f"データ内の最大連続増配年数：{max_streak} 年")
 
-# default_min を必ず [0, max_streak] に収める
+# default_min を必ず範囲内に収める
 default_min = 3
 default_min = min(max(default_min, 0), max_streak)
 
@@ -124,11 +132,6 @@ min_years = st.slider(
     value=default_min
 )
 
-max_streak = int(result["連続増配年数"].max()) if len(result) else 0
-default_min = 3 if max_streak >= 3 else max_streak
-
-min_years = st.slider("最低連続増配年数", 0, max(0, max_streak), default_min)
-
 markets = ["ALL"] + sorted([m for m in result["market"].dropna().unique().tolist() if str(m) != ""])
 market_sel = st.selectbox("市場", markets)
 
@@ -138,23 +141,18 @@ if market_sel != "ALL":
 
 filtered = filtered[filtered["連続増配年数"] >= min_years].copy()
 
-# 列が無い場合でも落ちないように
 cols = ["code", "name", "market", "連続増配年数"]
 if "DPS_CAGR_5Y" in filtered.columns:
     cols.append("DPS_CAGR_5Y")
 
-filtered = filtered[cols].sort_values(
-    ["連続増配年数"] + (["DPS_CAGR_5Y"] if "DPS_CAGR_5Y" in cols else []),
-    ascending=[False] * len(cols[3:])
-)
+# 並び替え：連続増配年数 → CAGR（ある場合）
+sort_cols = ["連続増配年数"] + (["DPS_CAGR_5Y"] if "DPS_CAGR_5Y" in cols else [])
+filtered = filtered[cols].sort_values(sort_cols, ascending=[False] * len(sort_cols))
 
 st.dataframe(filtered, use_container_width=True)
 
-if result.empty:
-    st.warning("配当データ（dps_regular_adj）が未入力のため、ランキングを計算できません。CSVに配当実績を入れると表示されます。")
-    st.stop()
-
-# デバッグ表示（必要ならON）
+# デバッグ
 with st.expander("デバッグ（必要なときだけ開く）"):
     st.write("データ行数:", len(df))
+    st.write("銘柄数:", df["code"].nunique())
     st.write(df.head(20))
