@@ -3,10 +3,9 @@ import pandas as pd
 
 st.title("📈 連続増配ランキング（全市場横断）")
 
-# CSV読み込み
 df = pd.read_csv("data/dividend_history.csv")
 
-# 必須列チェック（落ちるよりマシ）
+# 必須列チェック
 required = {"code", "fiscal_year", "dps_regular_adj"}
 missing = required - set(df.columns)
 if missing:
@@ -23,14 +22,11 @@ if "name" not in df.columns:
 if "market" not in df.columns:
     df["market"] = ""
 
-# 欠損除外 & ソート
 df = df.dropna(subset=["code", "fiscal_year", "dps_regular_adj"])
 df = df.sort_values(["code", "fiscal_year"])
 
 def calc_consecutive_growth(group: pd.DataFrame) -> int:
-    group = group.sort_values("fiscal_year")
     dps = group["dps_regular_adj"].tolist()
-
     years = 0
     for i in range(len(dps) - 1, 0, -1):
         if dps[i] > dps[i - 1]:
@@ -39,16 +35,13 @@ def calc_consecutive_growth(group: pd.DataFrame) -> int:
             break
     return years
 
-# ★ここが修正ポイント：reset_index(name=...) を使わない
-result = (
-    df.groupby(["code", "name", "market"], dropna=False)
-      .apply(calc_consecutive_growth)
-      .rename("連続増配年数")
-      .reset_index()
-)
+# ★ここを堅牢に：applyの結果を「値列」にして列名をあとで付ける
+applied = df.groupby(["code", "name", "market"], dropna=False).apply(calc_consecutive_growth)
+
+result = applied.reset_index()
+result.columns = ["code", "name", "market", "連続増配年数"]
 
 min_years = st.slider("最低連続増配年数", 0, 30, 3)
-
 filtered = result[result["連続増配年数"] >= min_years].copy()
 filtered = filtered.sort_values(["連続増配年数", "code"], ascending=[False, True])
 
