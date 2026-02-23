@@ -88,3 +88,6 @@ st.dataframe(filtered, use_container_width=True)
 with st.expander("デバッグ（必要なときだけ開く）"):
     st.write("データ行数:", len(df))
     st.write(df.head(20))
+
+st.write(df.dtypes)
+st.write(df.head(10))
