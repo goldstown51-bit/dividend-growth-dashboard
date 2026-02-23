@@ -75,40 +75,34 @@ meta = (
 )
 result = result.join(meta, on="code")
 
+# --- 5年DPS CAGRを result に追加（安全版） ---
 def dps_cagr_5y(group: pd.DataFrame) -> float:
     g = group.sort_values("fiscal_year")
     if len(g) < 6:
         return float("nan")
-    latest = g.iloc[-1]["dps_regular_adj"]
-    past = g.iloc[-6]["dps_regular_adj"]  # 5年前
+    latest = float(g.iloc[-1]["dps_regular_adj"])
+    past = float(g.iloc[-6]["dps_regular_adj"])  # 5年前
     if past <= 0:
         return float("nan")
     return (latest / past) ** (1/5) - 1
 
-cagr = (
-    df.groupby("code")
-      .apply(dps_cagr_5y)
-      .reset_index()
-      .rename(columns={0: "DPS_CAGR_5Y"})
-)
+cagr_series = df.groupby("code").apply(dps_cagr_5y)
 
-result = result.merge(cagr, on="code", how="left")
-result["DPS_CAGR_5Y"] = (result["DPS_CAGR_5Y"] * 100).round(2)
+# pandasの挙動差を吸収：SeriesでもDataFrameでもOKにする
+cagr = cagr_series.reset_index()
+# 2列目の名前が何でも、最後の列をCAGRとして扱う
+cagr = cagr.rename(columns={cagr.columns[-1]: "DPS_CAGR_5Y"})
+
+result = result.merge(cagr[["code", "DPS_CAGR_5Y"]], on="code", how="left")
+result["DPS_CAGR_5Y"] = (result["DPS_CAGR_5Y"] * 100).round(2)  # %
 
 # UI
+# --- フィルター/UI ---
 max_streak = int(result["連続増配年数"].max()) if len(result) else 0
-st.caption(f"データ内の最大連続増配年数：{max_streak} 年")
-
 default_min = 3 if max_streak >= 3 else max_streak
 
-min_years = st.slider(
-    "最低連続増配年数",
-    min_value=0,
-    max_value=max(0, max_streak),
-    value=default_min
-)
+min_years = st.slider("最低連続増配年数", 0, max(0, max_streak), default_min)
 
-# 市場フィルター（任意だけど便利）
 markets = ["ALL"] + sorted([m for m in result["market"].dropna().unique().tolist() if str(m) != ""])
 market_sel = st.selectbox("市場", markets)
 
@@ -116,14 +110,19 @@ filtered = result.copy()
 if market_sel != "ALL":
     filtered = filtered[filtered["market"] == market_sel]
 
-filtered = filtered.merge(result[["code","DPS_CAGR_5Y"]], on="code", how="left")
-filtered = filtered[["code", "name", "market", "連続増配年数", "DPS_CAGR_5Y"]]
-filtered = filtered.sort_values(["連続増配年数", "DPS_CAGR_5Y"], ascending=[False, False])
+filtered = filtered[filtered["連続増配年数"] >= min_years].copy()
 
-if filtered.empty:
-    st.warning("条件に合う銘柄がありません。スライダーを下げるか、年度データを増やしてください。")
-else:
-    st.dataframe(filtered, use_container_width=True)
+# 列が無い場合でも落ちないように
+cols = ["code", "name", "market", "連続増配年数"]
+if "DPS_CAGR_5Y" in filtered.columns:
+    cols.append("DPS_CAGR_5Y")
+
+filtered = filtered[cols].sort_values(
+    ["連続増配年数"] + (["DPS_CAGR_5Y"] if "DPS_CAGR_5Y" in cols else []),
+    ascending=[False] * len(cols[3:])
+)
+
+st.dataframe(filtered, use_container_width=True)
 
 # デバッグ表示（必要ならON）
 with st.expander("デバッグ（必要なときだけ開く）"):
