@@ -76,18 +76,36 @@ meta = (
 result = result.join(meta, on="code")
 
 # UI
-min_years = st.slider("最低連続増配年数", 0, 30, 3)
+max_streak = int(result["連続増配年数"].max()) if len(result) else 0
+st.caption(f"データ内の最大連続増配年数：{max_streak} 年")
 
-filtered = result[result["連続増配年数"] >= min_years].copy()
+default_min = 3 if max_streak >= 3 else max_streak
+
+min_years = st.slider(
+    "最低連続増配年数",
+    min_value=0,
+    max_value=max(0, max_streak),
+    value=default_min
+)
+
+# 市場フィルター（任意だけど便利）
+markets = ["ALL"] + sorted([m for m in result["market"].dropna().unique().tolist() if str(m) != ""])
+market_sel = st.selectbox("市場", markets)
+
+filtered = result.copy()
+if market_sel != "ALL":
+    filtered = filtered[filtered["market"] == market_sel]
+
+filtered = filtered[filtered["連続増配年数"] >= min_years].copy()
 filtered = filtered[["code", "name", "market", "連続増配年数"]]
 filtered = filtered.sort_values(["連続増配年数", "code"], ascending=[False, True])
 
-st.dataframe(filtered, use_container_width=True)
+if filtered.empty:
+    st.warning("条件に合う銘柄がありません。スライダーを下げるか、年度データを増やしてください。")
+else:
+    st.dataframe(filtered, use_container_width=True)
 
 # デバッグ表示（必要ならON）
 with st.expander("デバッグ（必要なときだけ開く）"):
     st.write("データ行数:", len(df))
     st.write(df.head(20))
-
-st.write(df.dtypes)
-st.write(df.head(10))
