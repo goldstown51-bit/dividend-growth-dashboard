@@ -107,6 +107,23 @@ result["DPS_CAGR_5Y"] = (result["DPS_CAGR_5Y"] * 100).round(2)
 
 # UI
 # --- フィルター/UI ---
+# max_streak が 0 のときも壊れないようにする
+max_streak = int(result["連続増配年数"].max()) if len(result) else 0
+max_streak = max(0, max_streak)
+
+st.caption(f"データ内の最大連続増配年数：{max_streak} 年")
+
+# default_min を必ず [0, max_streak] に収める
+default_min = 3
+default_min = min(max(default_min, 0), max_streak)
+
+min_years = st.slider(
+    "最低連続増配年数",
+    min_value=0,
+    max_value=max_streak,
+    value=default_min
+)
+
 max_streak = int(result["連続増配年数"].max()) if len(result) else 0
 default_min = 3 if max_streak >= 3 else max_streak
 
@@ -132,6 +149,10 @@ filtered = filtered[cols].sort_values(
 )
 
 st.dataframe(filtered, use_container_width=True)
+
+if result.empty:
+    st.warning("配当データ（dps_regular_adj）が未入力のため、ランキングを計算できません。CSVに配当実績を入れると表示されます。")
+    st.stop()
 
 # デバッグ表示（必要ならON）
 with st.expander("デバッグ（必要なときだけ開く）"):
