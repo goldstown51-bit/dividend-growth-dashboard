@@ -12,37 +12,79 @@ if missing:
     st.error(f"CSVに必要な列がありません: {', '.join(sorted(missing))}")
     st.stop()
 
-# 型を整える
+# 型整形
+df["code"] = df["code"].astype(str)
 df["fiscal_year"] = pd.to_numeric(df["fiscal_year"], errors="coerce")
 df["dps_regular_adj"] = pd.to_numeric(df["dps_regular_adj"], errors="coerce")
 
-# name/market は無くても動くように補完
+# name/market が無ければ補完
 if "name" not in df.columns:
-    df["name"] = df["code"].astype(str)
+    df["name"] = df["code"]
 if "market" not in df.columns:
     df["market"] = ""
 
-df = df.dropna(subset=["code", "fiscal_year", "dps_regular_adj"])
+# 欠損除外
+df = df.dropna(subset=["fiscal_year", "dps_regular_adj"])
 df = df.sort_values(["code", "fiscal_year"])
 
-def calc_consecutive_growth(group: pd.DataFrame) -> int:
-    dps = group["dps_regular_adj"].tolist()
-    years = 0
-    for i in range(len(dps) - 1, 0, -1):
-        if dps[i] > dps[i - 1]:
-            years += 1
+# --- 連続増配年数の計算（apply不使用） ---
+# 前年DPS
+df["prev_dps"] = df.groupby("code")["dps_regular_adj"].shift(1)
+# 増配フラグ（前年比で増えているか）
+df["is_growth"] = df["dps_regular_adj"] > df["prev_dps"]
+
+# 各銘柄の「直近年度」を特定
+latest_year = df.groupby("code")["fiscal_year"].max().rename("latest_year")
+df = df.merge(latest_year, on="code", how="left")
+
+# 直近から遡るために、直近年度との差（0,1,2...）を作る
+df["from_latest"] = (df["latest_year"] - df["fiscal_year"]).astype(int)
+
+# 直近側から並ぶように（0が最新）
+df = df.sort_values(["code", "from_latest"])
+
+# 連続増配：最新から見て is_growth が True の連続数
+# Trueが続く間だけ数えるために、最初のFalseが出た位置で打ち切り
+def consecutive_true_count(s: pd.Series) -> int:
+    # s: 最新から古い順の is_growth
+    count = 0
+    for v in s.tolist():
+        if v is True:
+            count += 1
         else:
             break
-    return years
+    return count
 
-# ★ここを堅牢に：applyの結果を「値列」にして列名をあとで付ける
-applied = df.groupby(["code", "name", "market"], dropna=False).apply(calc_consecutive_growth)
+# 最新年(差0)は prev_dps が無いので is_growth は False/NaN になりがち
+# 連続増配年数は「増配が起きた回数」なので、差1以降だけ見ればOK
+df_for_count = df[df["from_latest"] >= 1]
 
-result = applied.reset_index()
-result.columns = ["code", "name", "market", "連続増配年数"]
+result = (
+    df_for_count.groupby("code")["is_growth"]
+    .apply(consecutive_true_count)
+    .reset_index()
+    .rename(columns={"is_growth": "連続増配年数"})
+)
 
+# name/market を付与（銘柄マスタが無い前提で、最新の行から拾う）
+meta = (
+    df.sort_values(["code", "fiscal_year"])
+      .groupby("code")[["name", "market"]]
+      .tail(1)
+      .set_index("code")
+)
+result = result.join(meta, on="code")
+
+# UI
 min_years = st.slider("最低連続増配年数", 0, 30, 3)
+
 filtered = result[result["連続増配年数"] >= min_years].copy()
+filtered = filtered[["code", "name", "market", "連続増配年数"]]
 filtered = filtered.sort_values(["連続増配年数", "code"], ascending=[False, True])
 
 st.dataframe(filtered, use_container_width=True)
+
+# デバッグ表示（必要ならON）
+with st.expander("デバッグ（必要なときだけ開く）"):
+    st.write("データ行数:", len(df))
+    st.write(df.head(20))
